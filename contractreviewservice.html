@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 계약서 분석 서비스</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+        }
+        .risk-high { color: #EF4444; }
+        .risk-medium { color: #F59E0B; }
+        .risk-low { color: #10B981; }
+        .risk-none { color: #6B7280; }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900 mb-2">AI 계약서 자동 분석 서비스</h1>
+            <p class="text-gray-600">계약서 내용을 아래에 붙여넣고 '분석 시작' 버튼을 누르세요. 잠재적인 위험 요소를 신속하게 검토해 드립니다.</p>
+        </header>
+
+        <main class="bg-white p-6 rounded-xl shadow-md">
+            <div>
+                <label for="contract-text" class="block text-lg font-semibold mb-2 text-gray-700">계약서 원문</label>
+                <textarea id="contract-text" rows="15" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition" placeholder="이곳에 계약서 내용을 붙여넣으세요..."></textarea>
+            </div>
+            <div class="text-center mt-6">
+                <button id="analyze-btn" class="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-blue-700 transition-colors duration-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                    분석 시작
+                </button>
+            </div>
+        </main>
+
+        <section id="result-section" class="mt-8 bg-white p-6 rounded-xl shadow-md hidden">
+            <h2 class="text-2xl font-bold mb-4 border-b pb-2 text-gray-900">분석 보고서</h2>
+            <div id="loader" class="flex justify-center items-center h-40">
+                <div class="loader"></div>
+            </div>
+            <div id="report-content"></div>
+        </section>
+    </div>
+
+    <script>
+        // 이 부분은 제공된 Python 코드를 JavaScript로 변환한 계약 분석 서비스의 핵심 로직입니다.
+        const DEFAULT_CONFIG = [
+            {
+                name: "종료",
+                keywords: ["terminate", "termination", "cancel", "end"],
+                missing_risk: "high",
+                summary: "계약 종료 조건을 명시합니다.",
+                recommendation: "종료 조건, 통지 기간 및 해지 후 의무를 명확히 하십시오.",
+                warning_keywords: ["without cause", "at any time"],
+                positive_keywords: ["for cause", "breach", "insolvency"],
+            },
+            {
+                name: "기밀유지",
+                keywords: ["confidentiality", "confidential", "proprietary", "nda"],
+                missing_risk: "medium",
+                summary: "기밀 정보 보호 의무를 규정합니다.",
+                recommendation: "기밀 정보의 범위, 예외 사항, 보호 기간을 명확하게 정의해야 합니다.",
+                warning_keywords: ["perpetuity", "forever"],
+                positive_keywords: ["return", "destroy", "5 years"],
+            },
+            {
+                name: "책임 제한",
+                keywords: ["limitation of liability", "liable", "indemnify"],
+                missing_risk: "low",
+                summary: "손해배상 책임을 제한하는 조항입니다.",
+                recommendation: "책임 제한의 상한선이 합리적인지, 고의 또는 중과실이 제외되는지 확인하십시오.",
+                warning_keywords: ["indirect", "consequential", "special", "punitive", "lost profits"],
+                positive_keywords: ["direct damages", "gross negligence", "willful misconduct"],
+            },
+            {
+                name: "지적 재산권",
+                keywords: ["intellectual property", "ip", "ownership", "license"],
+                missing_risk: "high",
+                summary: "결과물에 대한 지적 재산권의 소유 및 사용 권한을 정의합니다.",
+                recommendation: "기존 IP와 신규 개발 IP의 소유권을 명확히 하고, 라이선스 범위를 구체적으로 기술해야 합니다.",
+                warning_keywords: ["assigns all right", "transfer all ownership"],
+                positive_keywords: ["retains ownership", "non-exclusive license"],
+            },
+            {
+                name: "준거법 및 재판 관할",
+                keywords: ["governing law", "jurisdiction", "venue"],
+                missing_risk: "medium",
+                summary: "법적 분쟁 발생 시 적용될 법률과 재판을 진행할 법원을 지정합니다.",
+                recommendation: "자신에게 유리한 법률과 재판 관할인지 확인하고, 불리할 경우 수정을 요청하십시오.",
+                warning_keywords: [],
+                positive_keywords: [],
+            }
+        ];
+
+        class ContractReviewService {
+            constructor(config = DEFAULT_CONFIG) {
+                this.config = config;
+            }
+
+            review(text) {
+                const normalizedText = this._normaliseText(text);
+                const sentences = this._splitSentences(normalizedText);
+                const results = this.config.map(clauseConfig => this._evaluateClause(clauseConfig, sentences));
+                return results;
+            }
+
+            generate_report(review) {
+                let lines = ["<h2>종합 위험도 평가</h2>"];
+                const riskCounts = { high: 0, medium: 0, low: 0 };
+                review.forEach(r => {
+                    if (r.present && r.risk_level !== 'none') {
+                       if (riskCounts[r.risk_level] !== undefined) riskCounts[r.risk_level]++;
+                    } else if (!r.present) {
+                       if (riskCounts[r.missing_risk] !== undefined) riskCounts[r.missing_risk]++;
+                    }
+                });
+                
+                let overallRisk = "low";
+                if (riskCounts.high > 0) overallRisk = "high";
+                else if (riskCounts.medium > 0) overallRisk = "medium";
+
+                lines.push(`<p class="mb-6">이 계약의 전반적인 위험도는 <strong class="risk-${overallRisk} uppercase font-bold">${overallRisk}</strong> 수준으로 평가됩니다. 아래 세부 분석을 확인하세요.</p>`);
+                lines.push("<h2>주요 조항 분석 결과</h2>");
+                
+                const clauses = review.map(r => {
+                    const riskLevel = r.present ? r.risk_level : r.missing_risk;
+                    const riskClass = `risk-${riskLevel}`;
+                    let clauseHtml = `<div class="mb-6 p-4 border rounded-lg ${riskLevel === 'high' ? 'border-red-200 bg-red-50' : riskLevel === 'medium' ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-gray-50'}">`;
+                    clauseHtml += `<h3 class="text-xl font-semibold">${r.name} <span class="text-sm font-bold uppercase ${riskClass}">(${riskLevel})</span></h3>`;
+
+                    if (r.present) {
+                        clauseHtml += `<p class="text-sm text-gray-600 mt-1">관련 문장이 ${r.matched_sentences.length}개 발견되었습니다.</p>`;
+                    } else {
+                        clauseHtml += `<p class="text-sm text-gray-600 mt-1">관련 조항이 발견되지 않았습니다.</p>`;
+                    }
+
+                    if (r.issues && r.issues.length > 0) {
+                        clauseHtml += '<div class="mt-3"><strong class="text-gray-700">⚠️ 잠재적 문제:</strong><ul class="list-disc list-inside text-gray-600 text-sm mt-1">';
+                        r.issues.forEach(issue => clauseHtml += `<li>${issue}</li>`);
+                        clauseHtml += '</ul></div>';
+                    }
+
+                    if (r.notes && r.notes.length > 0) {
+                        clauseHtml += '<div class="mt-3"><strong class="text-gray-700">긍정적 요소:</strong><ul class="list-disc list-inside text-gray-600 text-sm mt-1">';
+                        r.notes.forEach(note => clauseHtml += `<li>${note}</li>`);
+                        clauseHtml += '</ul></div>';
+                    }
+
+                    const recommendation = this.config.find(c => c.name === r.name).recommendation;
+                    if (recommendation) {
+                        clauseHtml += `<div class="mt-3"><strong class="text-gray-700">💡 권장 조치:</strong><p class="text-gray-600 text-sm">${recommendation}</p></div>`;
+                    }
+                    
+                    clauseHtml += '</div>';
+                    return clauseHtml;
+                });
+                
+                lines.push(...clauses);
+                return lines.join('');
+            }
+
+            _normaliseText(text) {
+                return text.trim().toLowerCase().replace(/\s+/g, ' ');
+            }
+
+            _splitSentences(text) {
+                // 문장 분리 정규식: 마침표, 물음표, 느낌표 뒤에 공백이 오는 경우를 기준으로 분리
+                return text.split(/(?<=[.!?])\s+/).filter(sentence => sentence.trim());
+            }
+            
+            _buildKeywordPattern(keyword) {
+                // 키워드가 단어 단위로 일치하도록 정규식 패턴을 생성합니다. (예: 'term'이 'determine'에 포함되지 않도록)
+                keyword = keyword.trim().toLowerCase();
+                if (!keyword) return new RegExp('^$');
+
+                // 공백을 포함하는 구문 처리
+                if (/\s/.test(keyword)) {
+                    const parts = keyword.split(/\s+/).filter(part => part).map(part => this._escapeRegExp(part));
+                    return new RegExp(`\\b${parts.join('\\s+')}\\b`, 'i');
+                } 
+                // 단일 단어 처리
+                else if (/\w/.test(keyword)) {
+                    return new RegExp(`\\b${this._escapeRegExp(keyword)}\\b`, 'i');
+                } 
+                // 기타 특수문자 등 처리
+                else {
+                    return new RegExp(this._escapeRegExp(keyword), 'i');
+                }
+            }
+
+            _escapeRegExp(string) {
+                return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            }
+
+            _evaluateClause(config, sentences) {
+                const keywordPatterns = config.keywords.map(kw => this._buildKeywordPattern(kw));
+                const matched = sentences.filter(sentence => keywordPatterns.some(pattern => pattern.test(sentence)));
+
+                const issues = [];
+                const notes = [];
+                let risk = matched.length > 0 ? "low" : config.missing_risk;
+
+                if (matched.length > 0) {
+                    const { warnings, positives } = this._evaluateWarnings(config, matched);
+                    issues.push(...warnings);
+                    notes.push(...positives);
+
+                    if (warnings.length > 0 && risk !== "high") {
+                        risk = "medium";
+                    }
+                    if (warnings.some(w => w.includes('심각'))) { // 예시: 특정 키워드가 포함되면 위험도 상향
+                        risk = "high";
+                    }
+                }
+
+                if (matched.length === 0) {
+                    issues.push(`${config.name} 조항이 감지되지 않았습니다.`);
+                }
+
+                return {
+                    name: config.name,
+                    present: matched.length > 0,
+                    risk_level: risk,
+                    matched_sentences: matched,
+                    issues: issues,
+                    notes: notes,
+                };
+            }
+            
+            _evaluateWarnings(config, sentences) {
+                const warnings = [];
+                const positives = [];
+                
+                const warningPatterns = config.warning_keywords.map(kw => this._buildKeywordPattern(kw));
+                const positivePatterns = config.positive_keywords.map(kw => this._buildKeywordPattern(kw));
+
+                sentences.forEach(sentence => {
+                    warningPatterns.forEach((pattern, i) => {
+                        if (pattern.test(sentence)) {
+                            warnings.push(`'${config.warning_keywords[i]}' 키워드가 포함되어 있어 주의가 필요합니다.`);
+                        }
+                    });
+                    positivePatterns.forEach((pattern, i) => {
+                        if (pattern.test(sentence)) {
+                            positives.push(`'${config.positive_keywords[i]}' 와 같은 긍정적 표현이 사용되었습니다.`);
+                        }
+                    });
+                });
+                return { warnings: [...new Set(warnings)], positives: [...new Set(positives)] };
+            }
+        }
+
+        // DOM 요소 연결 및 이벤트 리스너 설정
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const contractText = document.getElementById('contract-text');
+        const resultSection = document.getElementById('result-section');
+        const reportContent = document.getElementById('report-content');
+        const loader = document.getElementById('loader');
+        
+        analyzeBtn.addEventListener('click', () => {
+            const text = contractText.value;
+            if (!text.trim()) {
+                alert('계약서 내용을 입력해주세요.');
+                return;
+            }
+
+            resultSection.classList.remove('hidden');
+            reportContent.classList.add('hidden');
+            loader.style.display = 'flex';
+
+            // 실제 백엔드 호출을 시뮬레이션하기 위해 약간의 지연 시간을 줍니다.
+            setTimeout(() => {
+                const service = new ContractReviewService();
+                const reviewResult = service.review(text);
+                const reportHtml = service.generate_report(reviewResult);
+
+                reportContent.innerHTML = reportHtml;
+                loader.style.display = 'none';
+                reportContent.classList.remove('hidden');
+            }, 1000);
+        });
+
+    </script>
+</body>
+</html>
