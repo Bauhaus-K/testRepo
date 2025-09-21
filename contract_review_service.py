@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Pattern, Sequence, Tuple
 
 
 @dataclass(frozen=True)
@@ -207,8 +207,31 @@ class ContractReviewService:
         raw_sentences = re.split(r"(?<=[.!?])\s+", text)
         return [sentence.strip() for sentence in raw_sentences if sentence.strip()]
 
+    @staticmethod
+    def _build_keyword_pattern(keyword: str) -> Pattern[str]:
+        """Create a regex pattern that matches keyword boundaries safely."""
+
+        keyword = keyword.strip().lower()
+        if not keyword:
+            return re.compile(r"^$")
+
+        if re.search(r"\s", keyword):
+            parts = [re.escape(part) for part in keyword.split() if part]
+            pattern = r"\b" + r"\s+".join(parts) + r"\b"
+        elif re.search(r"\w", keyword):
+            pattern = r"\b" + re.escape(keyword) + r"\b"
+        else:
+            pattern = re.escape(keyword)
+
+        return re.compile(pattern)
+
     def _evaluate_clause(self, config: ClauseConfig, sentences: Sequence[str]) -> ClauseResult:
-        matched = [s for s in sentences if any(keyword in s for keyword in config.keywords)]
+        keyword_patterns = [self._build_keyword_pattern(keyword) for keyword in config.keywords]
+        matched = [
+            sentence
+            for sentence in sentences
+            if any(pattern.search(sentence) for pattern in keyword_patterns)
+        ]
         issues: List[str] = []
         notes: List[str] = []
         risk = "low" if matched else config.missing_risk

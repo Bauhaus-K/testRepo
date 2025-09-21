@@ -44,3 +44,23 @@ def test_positive_notes_lower_risk_when_clauses_are_balanced():
     assert any(note.startswith("양호") for note in liability["notes"])
 
     assert review["overall_risk"] == "medium"
+
+
+def test_substring_words_do_not_trigger_clause_detection():
+    service = ContractReviewService()
+    contract_text = (
+        "This standard agreement outlines partnership expectations, operational guidelines, "
+        "and general service levels without referencing confidentiality clauses or "
+        "specific intellectual rights."
+    )
+
+    review = service.review(contract_text)
+    clauses = {clause["name"]: clause for clause in review["clauses"]}
+
+    confidentiality = clauses["Confidentiality"]
+    assert confidentiality["present"] is False
+    assert confidentiality["matched_sentences"] == []
+
+    intellectual_property = clauses["Intellectual Property"]
+    assert intellectual_property["present"] is False
+    assert intellectual_property["matched_sentences"] == []
